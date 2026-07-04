@@ -1,0 +1,199 @@
+---
+title: "DASHBOARD ANALITIK ENERGI"
+output: html_document
+runtime: shiny
+---
+
+```{r setup_master, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo = FALSE)
+
+library(shiny)
+library(ggplot2)
+library(knitr)
+library(dplyr)
+library(greenchargeR)
+
+# 1. GENERATE DATA BASE UTAMA (DATA DUMMY)
+set.seed(2026)
+stasiun_list <- c("EV-01 Jakarta Pusat", "EV-02 Jakarta Selatan", "EV-03 Depok Margonda", 
+                  "EV-04 Serpong Tangerang", "EV-05 Bandung Dago", "EV-06 Surabaya Barat")
+
+data_base <- data.frame(
+  ID_Transaksi = 1001:1300,
+  Tanggal = seq(as.Date("2026-05-01"), as.Date("2026-07-04"), length.out = 300),
+  Stasiun = sample(stasiun_list, 300, replace = TRUE),
+  Konsumsi_kWh = runif(300, min = 20, max = 65),
+  Tarif_per_kWh = 2500,
+  Jam_Aktif = runif(300, min = 1.5, max = 6)
+)
+
+data_base$Pendapatan_Rp <- data_base$Konsumsi_kWh * data_base$Tarif_per_kWh
+data_base$Bulan_Angka <- as.numeric(format(data_base$Tanggal, "%m"))
+pilihan_bulan <- c("Mei" = 5, "Juni" = 6, "Juli" = 7)
+```
+
+```{r dashboard_statement_view, echo=FALSE}
+fluidPage(
+  tags$script(HTML("
+    function unduhHTMLAktif() {
+      var htmlContent = document.documentElement.outerHTML;
+      var blob = new Blob([htmlContent], {type: 'text/html'});
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'DOKUMEN_MUTASI_AKTIF.html';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+  ")),
+
+  tags$style(HTML("
+    body { 
+      background-color: #ffffff !important; 
+      font-family: 'Courier New', Courier, monospace !important; 
+      color: #000000 !important; 
+      margin: 0 auto; 
+      max-width: 850px; 
+      padding: 20px 10px !important; 
+    }
+    h1.title { display: none !important; } 
+    
+    .statement-title { font-size: 22px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; margin: 0; }
+    .statement-subtitle { font-size: 12px; text-transform: uppercase; margin-top: 5px; color: #4b5563; font-weight: bold; }
+    .divider-double { border-top: 3px double #000000; margin-top: 15px; margin-bottom: 20px; }
+    .divider-solid { border-top: 1px solid #000000; margin-top: 25px; margin-bottom: 15px; }
+    
+    .meta-text { font-size: 12px; line-height: 1.5; margin-bottom: 25px; }
+    
+    .filter-box { border: 1px solid #000000; padding: 15px; background-color: #fafafa; margin-bottom: 30px; }
+    .filter-box label { font-size: 12px; font-weight: bold; text-transform: uppercase; margin-bottom: 8px; display: block; }
+    
+    .section-title { font-size: 13px; font-weight: bold; text-transform: uppercase; margin-top: 30px; margin-bottom: 15px; letter-spacing: 0.5px; }
+    
+    .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid #000000; background: #ffffff; }
+    .kpi-cell { padding: 12px; border-right: 1px solid #000000; }
+    .kpi-cell:last-child { border-right: none; }
+    .kpi-cell strong { display: block; font-size: 10px; text-transform: uppercase; color: #4b5563; margin-bottom: 4px; }
+    .kpi-cell span { font-size: 14px; font-weight: bold; }
+    
+    table { width: 100% !important; border-collapse: collapse !important; margin-top: 10px; font-family: 'Courier New', Courier, monospace !important; }
+    th { color: #000000 !important; font-weight: bold !important; padding: 10px 6px !important; font-size: 12px; text-transform: uppercase; border-top: 1px solid #000000 !important; border-bottom: 1px solid #000000 !important; text-align: left; }
+    td { padding: 10px 6px !important; border-bottom: 1px dotted #000000 !important; font-size: 12px; color: #000000; }
+    tr:last-child td { border-bottom: 1px solid #000000 !important; }
+
+    .btn-ekspor {
+      background-color: #ffffff !important;
+      color: #000000 !important;
+      border: 1px solid #000000 !important;
+      border-radius: 0px !important;
+      font-family: 'Courier New', Courier, monospace !important;
+      font-size: 11px !important;
+      font-weight: bold !important;
+      text-transform: uppercase;
+      padding: 8px 16px !important;
+      margin-right: 10px;
+      cursor: pointer;
+    }
+    .btn-ekspor:hover {
+      background-color: #000000 !important;
+      color: #ffffff !important;
+    }
+    
+    @media print {
+      .filter-box, .section-title:last-of-type, .btn-ekspor { display: none !important; }
+    }
+  ")),
+  
+  div(class = "statement-title", "PT GREEN CHARGE INDONESIA"),
+  div(class = "statement-subtitle", "LAPORAN MUTASI ENERGI & IKHTISAR FINANSIAL STASIUN EV"),
+  div(class = "divider-double"),
+  
+  fluidRow(
+    column(6, div(class = "meta-text", HTML("OTORISASI: OPERATOR STASIUN (24611052-Shofi Salsabila)<br>KLASIFIKASI: DOKUMEN INTERNAL MANAJEMEN"))),
+    column(6, div(class = "meta-text", style = "text-align: right;", HTML("TANGGAL CETAK: 2026-07-04<br>STATUS DATA: TERVERIFIKASI ASLI")))
+  ),
+  
+  div(class = "filter-box",
+      selectInput("pilih_bulan", "PILIH PERIODE BULAN LAPORAN:", choices = pilihan_bulan, selected = 7, width = "300px")
+  ),
+  
+  div(class = "section-title", "[01] INDIKATOR KINERJA UTAMA / KEY PERFORMANCE INDICATORS"),
+  uiOutput("kpi_render"),
+  
+  div(class = "section-title", "[02] RINCIAN REKAPITULASI MUTASI PER STASIUN WILAYAH"),
+  tableOutput("tabel_render"),
+  
+  div(class = "section-title", "[03] GRAFIK DISTRIBUSI BEBAN KONSUMSI DAYA LISTRIK TOTAL"),
+  plotOutput("grafik_render", height = "280px"),
+
+  div(class = "section-title", "[04] OTORISASI EKSPOR DATA & DOKUMEN"),
+  div(style = "margin-top: 10px; margin-bottom: 20px;",
+      downloadButton("unduh_csv", "EXPORT DATA MENTAH (.CSV)", class = "btn-ekspor"),
+      actionButton("unduh_html_browser", "SAVE DOKUMEN CURRENT (.HTML)", class = "btn-ekspor", onclick = "unduhHTMLAktif();"),
+      actionButton("cetak_halaman", "CETAK / SAVE AS PDF (BROWSER)", class = "btn-ekspor", onclick = "window.print();")
+  ),
+  
+  div(class = "divider-solid"),
+  p(style = "text-align: center; font-size: 10px; color: #6b7280; font-weight: bold;", "--- AKHIR DARI DOKUMEN RESMI PT GREEN CHARGE INDONESIA ---")
+)
+
+# --- LOGIKA SERVER INTERNAL ---
+data_aktif <- reactive({
+  data_base %>% filter(Bulan_Angka == as.numeric(input$pilih_bulan))
+})
+
+output$kpi_render <- renderUI({
+  df <- data_aktif()
+  
+  kpi <- greenchargeR::hitung_kpi_summary(df)
+  
+  div(class = "kpi-row",
+      div(class = "kpi-cell", tags$strong("TOTAL ENERGI"), tags$span(paste(kpi$total_kwh, "kWh"))),
+      div(class = "kpi-cell", tags$strong("TOTAL OMZET"), tags$span(paste("Rp", kpi$total_rp))),
+      div(class = "kpi-cell", tags$strong("RATA-RATA UTILITY"), tags$span(paste(kpi$utilitas, "Jam"))),
+      div(class = "kpi-cell", tags$strong("PREDIKSI BESOK"), tags$span(paste(kpi$prediksi, "kWh")))
+  )
+})
+
+output$tabel_render <- renderTable({
+  df <- data_aktif()
+  tabel_ringkasan <- df %>%
+    group_by(Stasiun) %>%
+    summarise(
+      `DAYA LISTRIK (kWh)` = round(sum(Konsumsi_kWh), 2),
+      `JUMLAH PENDAPATAN` = sum(Pendapatan_Rp)
+    )
+  
+  tabel_ringkasan$`JUMLAH PENDAPATAN` <- sapply(tabel_ringkasan$`JUMLAH PENDAPATAN`, function(x) {
+    paste("Rp", format_neraca_keuangan(x))
+  })
+  
+  names(tabel_ringkasan)[1] <- "IDENTITAS LOKASI STASIUN"
+  tabel_ringkasan
+}, width = "100%")
+
+output$grafik_render <- renderPlot({
+  df <- data_aktif()
+  df_grafik <- df %>% group_by(Stasiun) %>% summarise(Total_Daya = sum(Konsumsi_kWh))
+  
+  ggplot(df_grafik, aes(x = Stasiun, y = Total_Daya, fill = Stasiun)) +
+    geom_bar(stat = "identity", width = 0.4, color = "#000000", size = 0.7) +
+    theme_linedraw(base_size = 10) +
+    labs(x = NULL, y = "Volume Energi (kWh)") +
+    scale_fill_manual(values = c("#111111", "#333333", "#555555", "#777777", "#999999", "#cccccc")) +
+    theme(
+      text = element_text(family = "Courier"), legend.position = "none",
+      panel.grid.major.y = element_line(color = "#e5e7eb", linetype = "dashed"),
+      panel.grid.major.x = element_blank(), panel.grid.minor = element_blank(),
+      axis.text.x = element_text(color = "#000000", fontface = "bold"),
+      axis.text.y = element_text(color = "#000000")
+    )
+})
+
+output$unduh_csv <- downloadHandler(
+  filename = function() { paste0("MUTASI_DATA_BULAN_", input$pilih_bulan, ".csv") },
+  content = function(file) { write.csv(data_aktif(), file, row.names = FALSE) }
+)
+
+```
+
